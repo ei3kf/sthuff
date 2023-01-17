@@ -1,0 +1,187 @@
+Create Key
+----------
+With SSE-C, you are in charge of the secret key while AWS still cares about encryption/decryption. Every time you call the S3 API, you also have to attach the secret key.
+
+To generate a random 32 bytes (256 bits) secret key, run:
+$ openssl rand -out ~/sse-c.key 32
+
+
+AWS CLI
+-------
+$ aws s3 cp sse-c-test.gz s3://ei3kf/sse-c-test.gz --sse-c AES256 --sse-c-key fileb://~/sse-c.key
+upload: ./sse-c-test.gz to s3://ei3kf/sse-c-test.gz
+
+$ aws s3 ls s3://ei3kf/
+2021-04-29 09:05:00 1048576000 sse-c-test.gz
+
+Download object not using sse-c
+$ aws s3 cp s3://ei3kf/sse-c-test.gz .
+fatal error: An error occurred (400) when calling the HeadObject operation: Bad Request
+
+Download object using sse-c
+$ aws s3 cp s3:/ei3kf/sse-c-test.gz . --sse-c AES256 --sse-c-key fileb://~/sse-c.key
+download: s3://ei3kf/sse-c-test.gz to ./sse-c-test.gz
+
+Download object using sse-c but different key
+$ openssl rand -out ~/sse-c-2.key 32
+$ aws s3 cp s3://ei3kf/sse-c-test.gz . --sse-c AES256 --sse-c-key fileb://~/sse-c-2.key
+fatal error: An error occurred (403) when calling the HeadObject operation: Forbidden
+
+Copy object in S3 to another bucket using sse-c
+BROKEN : https://github.com/aws/aws-cli/issues/6012
+
+
+Python + Boto3
+--------------
+Create Key
+import os
+KEY = os.urandom(32)
+KEY
+b'\xb1B\x84\x7f*\xbc\x99so\x133W\xbf@ \xa5\xb8\x1dZ\xc0M\xc7\x9d\x15\xc3/\x0e\xea\x9b}\xe0?'
+
+Alternative Create Key
+from base64 import b64encode, b64decode
+from os import urandom
+random_bytes = urandom(32)
+token = b64encode(random_bytes).decode('utf-8')
+random_bytes
+b'R\xfe\xdc\xbf~_>\xabS\xa1\xb2y\x85\x1a\x8f\xd0\x83\xc8\xe2\x1dudMO\x13\xefTt\x87\xe0\x11\x8a'
+token
+'Uv7cv35fPqtTobJ5hRqP0IPI4h11ZE1PE+9UdIfgEYo='
+base64.b64decode(token)
+b'R\xfe\xdc\xbf~_>\xabS\xa1\xb2y\x85\x1a\x8f\xd0\x83\xc8\xe2\x1dudMO\x13\xefTt\x87\xe0\x11\x8a'
+
+$ export KEY='Uv7cv35fPqtTobJ5hRqP0IPI4h11ZE1PE+9UdIfgEYo='
+
+import os
+from base64 import b64decode
+KEY = os.environ['KEY']
+KEY
+'Uv7cv35fPqtTobJ5hRqP0IPI4h11ZE1PE+9UdIfgEYo='
+b64decode(KEY)
+b'R\xfe\xdc\xbf~_>\xabS\xa1\xb2y\x85\x1a\x8f\xd0\x83\xc8\xe2\x1dudMO\x13\xefTt\x87\xe0\x11\x8a'
+
+Upload object using sse-c
+import os, boto3
+client = boto3.client('s3', region_name='eu-west-1')
+file_name = 'test.gz'
+bucket = 'ei3kf'
+KEY=b'\xb1B\x84\x7f*\xbc\x99so\x133W\xbf@ \xa5\xb8\x1dZ\xc0M\xc7\x9d\x15\xc3/\x0e\xea\x9b}\xe0?'
+client.upload_file(file_name, bucket, file_name, ExtraArgs={'SSECustomerKey': KEY, 'SSECustomerAlgorithm': 'AES256'})
+
+Download object not using sse-c
+>>> client.download_file(bucket, file_name, file_name)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/usr/local/lib/python3.7/site-packages/boto3/s3/inject.py", line 172, in download_file
+    extra_args=ExtraArgs, callback=Callback)
+  File "/usr/local/lib/python3.7/site-packages/boto3/s3/transfer.py", line 307, in download_file
+    future.result()
+  File "/usr/local/lib/python3.7/site-packages/s3transfer/futures.py", line 106, in result
+    return self._coordinator.result()
+  File "/usr/local/lib/python3.7/site-packages/s3transfer/futures.py", line 265, in result
+    raise self._exception
+  File "/usr/local/lib/python3.7/site-packages/s3transfer/tasks.py", line 255, in _main
+    self._submit(transfer_future=transfer_future, **kwargs)
+  File "/usr/local/lib/python3.7/site-packages/s3transfer/download.py", line 343, in _submit
+    **transfer_future.meta.call_args.extra_args
+  File "/usr/local/lib/python3.7/site-packages/botocore/client.py", line 357, in _api_call
+    return self._make_api_call(operation_name, kwargs)
+  File "/usr/local/lib/python3.7/site-packages/botocore/client.py", line 676, in _make_api_call
+    raise error_class(parsed_response, operation_name)
+botocore.exceptions.ClientError: An error occurred (400) when calling the HeadObject operation: Bad Request
+
+Download object using sse-c
+import os, boto3
+client = boto3.client('s3', region_name='eu-west-1')
+file_name = 'test.gz'
+bucket = 'ei3kf'
+KEY=b'\xb1B\x84\x7f*\xbc\x99so\x133W\xbf@ \xa5\xb8\x1dZ\xc0M\xc7\x9d\x15\xc3/\x0e\xea\x9b}\xe0?'
+client.download_file(bucket, file_name, file_name, ExtraArgs={'SSECustomerKey': KEY, 'SSECustomerAlgorithm': 'AES256'})
+
+Download object using sse-c but different key
+KEY=os.urandom(32) KEY b'\x0e\x1d\x17\x9d\xb3\t\xa8\xd0}\x82\xfbM(rk\xf1\xfa\x03C\x193\x9d\xd5\x8dh\x00e\xfc2\xc3\xd4\xfb
+
+client.download_file(bucket, file_name, file_name, ExtraArgs={'SSECustomerKey': KEY, 'SSECustomerAlgorithm': 'AES256'}) Traceback (most recent call last):
+
+ File "<stdin>", line 1, in <module>
+ File "/usr/local/lib/python3.7/site-packages/boto3/s3/inject.py", line 172, in download_file
+   extra_args=ExtraArgs, callback=Callback)
+ File "/usr/local/lib/python3.7/site-packages/boto3/s3/transfer.py", line 307, in download_file
+   future.result()
+ File "/usr/local/lib/python3.7/site-packages/s3transfer/futures.py", line 106, in result
+   return self._coordinator.result()
+ File "/usr/local/lib/python3.7/site-packages/s3transfer/futures.py", line 265, in result
+   raise self._exception
+ File "/usr/local/lib/python3.7/site-packages/s3transfer/tasks.py", line 255, in _main
+   self._submit(transfer_future=transfer_future, **kwargs)
+ File "/usr/local/lib/python3.7/site-packages/s3transfer/download.py", line 343, in _submit
+   **transfer_future.meta.call_args.extra_args
+ File "/usr/local/lib/python3.7/site-packages/botocore/client.py", line 357, in _api_call
+   return self._make_api_call(operation_name, kwargs)
+ File "/usr/local/lib/python3.7/site-packages/botocore/client.py", line 676, in _make_api_call
+   raise error_class(parsed_response, operation_name)
+botocore.exceptions.ClientError: An error occurred (403) when calling the HeadObject operation: Forbidden
+
+
+Copy object in S3 to another bucket using sse-c
+Note: Source object is not encrypted with sse-c
+
+import os
+import boto3
+resource = boto3.resource('s3', region_name='eu-west-1')
+file_name = 'test.gz'
+src_bucket = 'ei3kf'
+dst_bucket = 'ei3kf-2'
+KEY=b'\xb1B\x84\x7f*\xbc\x99so\x133W\xbf@ \xa5\xb8\x1dZ\xc0M\xc7\x9d\x15\xc3/\x0e\xea\x9b}\xe0?'
+copy_source = {'Bucket': src_bucket, 'Key': file_name}
+extra_args = {'SSECustomerKey': KEY, 'SSECustomerAlgorithm': 'AES256'}
+resource.meta.client.copy(copy_source, dst_bucket, file_name, extra_args)
+
+
+Testing
+-------
+$ md5sum linux-5.0-rc3.tar.gz
+465f79af7f5bb7c1a13608ed88b93f73  linux-5.0-rc3.tar.gz
+
+$ aws s3 cp linux-5.0-rc3.tar.gz s3://ei3kf/
+upload: ./linux-5.0-rc3.tar.gz to s3://ei3kf/linux-5.0-rc3.tar.gz
+
+$ aws s3 ls s3://ei3kf/
+2021-04-29 17:05:53  162569289 linux-5.0-rc3.tar.gz
+
+$ python3
+
+import boto3, os
+resource = boto3.resource('s3', region_name='eu-west-1')
+file_name='linux-5.0-rc3.tar.gz'
+file_name_enc=file_name + ".encrypted"
+src_bucket='ei3kf'
+dst_bucket='ei3kf-2'
+KEY=b'\xb1B\x84\x7f*\xbc\x99so\x133W\xbf@ \xa5\xb8\x1dZ\xc0M\xc7\x9d\x15\xc3/\x0e\xea\x9b}\xe0?'
+copy_source = {'Bucket': src_bucket, 'Key': file_name}
+extra_args = {'SSECustomerKey': KEY, 'SSECustomerAlgorithm': 'AES256', 'ACL': 'bucket-owner-full-control'}
+resource.meta.client.copy(copy_source, dst_bucket, file_name_enc, extra_args)
+quit()
+
+$ aws s3 ls s3://ei3kf-2/
+2021-04-29 17:15:30  162569289 linux-5.0-rc3.tar.gz.encrypted
+
+$ python3
+
+import os
+import boto3
+client = boto3.client('s3', region_name='eu-west-1')
+KEY=b'\xb1B\x84\x7f*\xbc\x99so\x133W\xbf@ \xa5\xb8\x1dZ\xc0M\xc7\x9d\x15\xc3/\x0e\xea\x9b}\xe0?'
+bucket = 'ei3kf-2'
+file_name = 'linux-5.0-rc3.tar.gz.encrypted'
+file_name_dec = file_name.replace(".encrypted","")
+client.download_file(bucket, file_name, file_name_dec, ExtraArgs={'SSECustomerKey': KEY, 'SSECustomerAlgorithm': 'AES256'})
+quit()
+
+$ ls -l
+total 158760
+-rw-rw-r-- 1 ec2-user ec2-user 162569289 Apr 29 17:22 linux-5.0-rc3.tar.gz
+
+$ md5sum linux-5.0-rc3.tar.gz
+465f79af7f5bb7c1a13608ed88b93f73  linux-5.0-rc3.tar.gz
